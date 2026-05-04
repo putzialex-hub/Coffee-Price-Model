@@ -1,0 +1,3 @@
+# Optional: only needed if you have a Refinitiv/LSEG Workspace running.
+# News monitoring falls back to Google News RSS without this.
+refinitiv-data
