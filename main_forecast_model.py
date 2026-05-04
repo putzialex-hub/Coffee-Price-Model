@@ -51,8 +51,8 @@ def update_cot_data():
     if should_update_cot():
         print("   ⬇️ Lade aktuelle COT-Daten von CFTC...")
         try:
-            cot_script_path = r"C:\Users\WZHALP3\OneDrive - Raiffeisen Bank International Group\Agriculture\Coffee\Coffee Price-20260202T064517Z-3-001\Coffee Price\fetch_cot_data.py"
-            working_dir = os.path.dirname(cot_script_path)
+            cot_script_path = os.path.join(script_dir, 'fetch_cot_data.py')
+            working_dir = script_dir
             my_env = os.environ.copy()
             my_env["PYTHONIOENCODING"] = "utf-8"
             result = subprocess.run(
@@ -85,14 +85,15 @@ def load_data(data_dir=DATA_DIR):
                   robusta[['date', 'price']].rename(columns={'price': 'robusta_price'}),
                   on='date', how='outer')
 
-    if pd.io.common.file_exists('coffee_data.csv'):
-        macro = pd.read_csv('coffee_data.csv')
+    path_macro = os.path.join(data_dir, 'coffee_data.csv')
+    if os.path.exists(path_macro):
+        macro = pd.read_csv(path_macro)
         macro['date'] = pd.to_datetime(macro['Date'])
         df = pd.merge(df, macro[['date', 'USD_BRL', 'DXY']], on='date', how='left')
 
     # Stocks (mit skiprows Fix)
     path_stocks_a = os.path.join(data_dir, 'arabica_stocks.csv')
-    if pd.io.common.file_exists(path_stocks_a):
+    if os.path.exists(path_stocks_a):
         st_a = pd.read_csv(path_stocks_a, sep=';', skiprows=[1])
         st_a['date'] = pd.to_datetime(st_a['Date'], format='%d.%m.%Y', errors='coerce')
         st_a['Certified_Stocks'] = pd.to_numeric(st_a['Certified_Stocks'], errors='coerce')
@@ -100,7 +101,7 @@ def load_data(data_dir=DATA_DIR):
             columns={'Certified_Stocks': 'arabica_stocks'}), on='date', how='left')
 
     path_stocks_r = os.path.join(data_dir, 'robusta_stocks.csv')
-    if pd.io.common.file_exists(path_stocks_r):
+    if os.path.exists(path_stocks_r):
         st_r = pd.read_csv(path_stocks_r, sep=';', skiprows=[1])
         st_r['date'] = pd.to_datetime(st_r['Date'], format='%d.%m.%Y', errors='coerce')
         col_s = [c for c in st_r.columns if c != 'Date'][0]
@@ -108,13 +109,15 @@ def load_data(data_dir=DATA_DIR):
         df = pd.merge(df, st_r[['date', col_s]].rename(
             columns={col_s: 'robusta_stocks'}), on='date', how='left')
 
-    if pd.io.common.file_exists('cot_data.csv'):
-        cot = pd.read_csv('cot_data.csv')
+    path_cot = os.path.join(data_dir, 'cot_data.csv')
+    if os.path.exists(path_cot):
+        cot = pd.read_csv(path_cot)
         cot['date'] = pd.to_datetime(cot['date'])
         df = pd.merge(df, cot, on='date', how='left')
 
-    if pd.io.common.file_exists('weather_minas_gerais.csv'):
-        w_mg = pd.read_csv('weather_minas_gerais.csv')
+    path_w_mg = os.path.join(data_dir, 'weather_minas_gerais.csv')
+    if os.path.exists(path_w_mg):
+        w_mg = pd.read_csv(path_w_mg)
         w_mg['date'] = pd.to_datetime(w_mg['date'])
         w_mg['rain_90d_mg'] = w_mg['precipitation_sum'].rolling(90).sum()
         is_rainy = w_mg['precipitation_sum'] >= 1.0
@@ -125,8 +128,9 @@ def load_data(data_dir=DATA_DIR):
             columns={'temperature_2m_min': 'temp_min_mg'}), on='date', how='left')
         print("   ✅ Wetter Minas Gerais geladen!")
 
-    if pd.io.common.file_exists('weather_dak_lak.csv'):
-        w_dl = pd.read_csv('weather_dak_lak.csv')
+    path_w_dl = os.path.join(data_dir, 'weather_dak_lak.csv')
+    if os.path.exists(path_w_dl):
+        w_dl = pd.read_csv(path_w_dl)
         w_dl['date'] = pd.to_datetime(w_dl['date'])
         w_dl['rain_90d_dl'] = w_dl['precipitation_sum'].rolling(90).sum()
         is_rainy_dl = w_dl['precipitation_sum'] >= 1.0

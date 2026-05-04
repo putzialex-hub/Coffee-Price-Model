@@ -9,10 +9,7 @@ print("🌤️ Open-Meteo Wetterdaten Downloader")
 print("====================================")
 
 # Konfiguration
-DEFAULT_OUTPUT_DIR = (
-    r"C:\Users\WZHALP3\OneDrive - Raiffeisen Bank International Group\Agriculture"
-    r"\Coffee\Coffee Price-20260202T064517Z-3-001\Coffee Price"
-)
+DEFAULT_OUTPUT_DIR = os.path.dirname(os.path.abspath(__file__))
 OUTPUT_DIR = os.getenv("OPEN_METEO_OUTPUT_DIR", DEFAULT_OUTPUT_DIR)
 
 REGIONS = {
