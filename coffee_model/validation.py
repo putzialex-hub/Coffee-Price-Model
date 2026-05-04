@@ -97,11 +97,15 @@ def walk_forward(
                 pinball_low = _pinball_loss(actual_price, price_by_q[min(quantiles)], min(quantiles))
                 pinball_high = _pinball_loss(actual_price, price_by_q[max(quantiles)], max(quantiles))
                 in_interval = price_by_q[min(quantiles)] <= actual_price <= price_by_q[max(quantiles)]
+                dir_correct = int(
+                    (pred_price > start_price) == (actual_price > start_price)
+                )
 
                 rows.append({
                     "cutoff": val_cutoff,
                     "commodity": comm,
                     "horizon": h,
+                    "start_price": start_price,
                     "predicted": pred_price,
                     "predicted_low": price_by_q[min(quantiles)],
                     "predicted_high": price_by_q[max(quantiles)],
@@ -111,6 +115,7 @@ def walk_forward(
                     "pinball_low": pinball_low,
                     "pinball_high": pinball_high,
                     "in_interval": int(in_interval),
+                    "dir_correct": dir_correct,
                 })
 
     return pd.DataFrame(rows)
@@ -126,11 +131,13 @@ def summarise(val_df: pd.DataFrame) -> dict[tuple, dict]:
             sub = val_df[(val_df["commodity"] == comm) & (val_df["horizon"] == h)]
             if sub.empty:
                 continue
+            dir_acc = sub["dir_correct"].mean() * 100 if "dir_correct" in sub else float("nan")
             out[(comm, h)] = {
                 "mae": sub["error_pct"].abs().mean(),
                 "bias": sub["error_pct"].mean(),
                 "std": sub["error_pct"].std(),
                 "hit_rate_15": (sub["error_pct"].abs() < 15).mean() * 100,
+                "dir_accuracy": dir_acc,
                 "coverage_90": sub["in_interval"].mean() * 100,
                 "pinball_base": sub["pinball_base"].mean(),
                 "pinball_low": sub["pinball_low"].mean(),
@@ -158,3 +165,58 @@ def bias_corrections(val_df: pd.DataFrame) -> dict[tuple[str, int], float]:
             log_bias = np.mean(np.log(sub["predicted"] / sub["actual"]))
             out[(comm, int(h))] = float(log_bias)
     return out
+
+
+def conformal_deltas(
+    val_df: pd.DataFrame,
+    target_coverage: float = 0.90,
+) -> dict[tuple[str, int], float]:
+    """Compute per-(commodity, horizon) conformal expansion delta.
+
+    Uses split-conformal prediction for quantile regression:
+    - Nonconformity score s_i = max(q_low_i - actual_i, actual_i - q_high_i)
+      (positive when actual is outside the raw interval, negative when inside)
+    - q_hat = the ceil((n+1)*(1-alpha))/n empirical quantile of scores
+    - At prediction time: adjusted_low = q_low - q_hat,
+                          adjusted_high = q_high + q_hat
+
+    This guarantees ~target_coverage marginal coverage (finite-sample valid).
+    When the raw interval is already wide enough, q_hat may be negative,
+    which slightly tightens the interval — that is intentional.
+    """
+    out: dict[tuple[str, int], float] = {}
+    if val_df.empty:
+        return out
+    alpha = 1.0 - target_coverage
+    for comm in val_df["commodity"].unique():
+        for h in sorted(val_df["horizon"].unique()):
+            sub = val_df[(val_df["commodity"] == comm) & (val_df["horizon"] == h)].copy()
+            if len(sub) < 4:
+                out[(comm, int(h))] = 0.0
+                continue
+            scores = np.maximum(
+                sub["predicted_low"].values - sub["actual"].values,
+                sub["actual"].values - sub["predicted_high"].values,
+            )
+            n = len(scores)
+            level = np.ceil((n + 1) * (1 - alpha)) / n
+            level = min(level, 1.0)
+            q_hat = float(np.quantile(scores, level))
+            out[(comm, int(h))] = q_hat
+    return out
+
+
+def apply_conformal(
+    preds: dict[tuple, float],
+    deltas: dict[tuple[str, int], float],
+    commodities: list[str],
+    horizons: list[int],
+) -> dict[tuple, float]:
+    """Expand/contract Low and High predictions by conformal delta."""
+    corrected = dict(preds)
+    for comm in commodities:
+        for h in horizons:
+            delta = deltas.get((comm, int(h)), 0.0)
+            corrected[(comm, h, 0.05)] = preds[(comm, h, 0.05)] - delta
+            corrected[(comm, h, 0.95)] = preds[(comm, h, 0.95)] + delta
+    return corrected

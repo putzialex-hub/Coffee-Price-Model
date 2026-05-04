@@ -95,6 +95,20 @@ def add_features(df: pd.DataFrame) -> pd.DataFrame:
         if "vietnam_drought_risk" in df.columns:
             df["oni_x_vietnam_drought"] = df["oni"] * df["vietnam_drought_risk"]
 
+    # Macro: USD/BRL is the primary Arabica driver (BRL depreciation → more supply,
+    # lower USD price). DXY captures broad dollar strength for both commodities.
+    if "USD_BRL" in df.columns:
+        df["usd_brl_change_30d"] = df["USD_BRL"].pct_change(30) * 100
+        df["usd_brl_change_90d"] = df["USD_BRL"].pct_change(90) * 100
+        df["usd_brl_zscore"] = (
+            df["USD_BRL"] - df["USD_BRL"].rolling(252).mean()
+        ) / df["USD_BRL"].rolling(252).std()
+    if "DXY" in df.columns:
+        df["dxy_change_30d"] = df["DXY"].pct_change(30) * 100
+        df["dxy_zscore"] = (
+            df["DXY"] - df["DXY"].rolling(252).mean()
+        ) / df["DXY"].rolling(252).std()
+
     essential_cols = ["arabica_price", "robusta_price", "month_sin", "month_cos"]
     df = df.dropna(subset=essential_cols).reset_index(drop=True)
     return df
