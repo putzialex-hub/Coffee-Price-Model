@@ -1,25 +1,34 @@
-# ☕ Coffee Price Forecasting Model - Dokumentation (v5 Production)
+# ☕ Coffee Price Forecasting Model - Dokumentation (v6)
 
 Dieses Dokument beschreibt die Architektur, Datenquellen und Funktionsweise des Profi-Prognosemodells für Arabica- und Robusta-Preise (6 Monate Horizont).
 
-**Version:** 5.0  
-**Letzte Aktualisierung:** Februar 2026  
-**Status:** Production-Ready
+**Version:** 6.0
+**Status:** Refactored package (`coffee_model/`) with LightGBM quantile engine, ONI/ENSO features, and full-quantile walk-forward.
 
----
+## v6 changes vs. v5
+
+- Code lebt jetzt im `coffee_model/`-Paket (config, data_loading, features, models, validation, plotting, main); `main_forecast_model.py` ist ein dünner Wrapper.
+- LightGBM-Quantile-Engine als Default (`--engine lightgbm`); sklearn-GBR als Fallback (`--engine sklearn`).
+- Zentrale `MODEL_CONFIGS` — Live-Modell und Walk-Forward nutzen identische Hyperparameter.
+- ONI/ENSO-Daten werden geladen und als `oni`, `oni_3m_ma`, `el_nino`, `la_nina`, `oni_lag6m`, `oni_lag9m` plus Drought-Interaktionen exposed.
+- Walk-Forward fittet alle drei Quantile (vorher nur Median) und liefert Pinball-Loss + 90%-Coverage.
+- Robusta-Bias-Korrektur (mittlerer Log-Bias aus Walk-Forward) wird auf den Live-Forecast als Offset angewendet und im CSV (`*_BiasCorrection`) ausgewiesen.
+- Quantile-Crossing wird durch sortierte Quantil-Predictions verhindert.
 
 ## 1. Performance-Übersicht
 
-Das Modell wurde durch mehrere Iterationen signifikant verbessert:
+| Metrik | v5 (sklearn-GBR, Median-only WF) | v6 (LightGBM, full-quantile WF) |
+|--------|----------------------------------|--------------------------------|
+| **Arabica 180d MAE** | 19.0% | **18.7%** |
+| **Arabica 180d Bias** | -3.5% | -3.0% |
+| **Arabica 180d Hit-Rate** | 42.9% | 42.9% |
+| **Robusta 180d MAE** | 20.0% | 20.5% |
+| **Robusta 180d Bias** | -6.4% | -7.2% (korrigiert auf <2% via Offset) |
+| **Robusta 180d Hit-Rate** | 28.6% | 28.6% |
 
-| Metrik | Original (v3) | Aktuell (v5) | Verbesserung |
-|--------|---------------|--------------|--------------|
-| **Arabica 180d MAE** | 26.5% | **19.0%** | -7.5% |
-| **Arabica 180d Bias** | -2.6% | **-3.5%** | ~ |
-| **Arabica 180d Hit-Rate** | 21.4% | **42.9%** | +21.5% |
-| **Robusta 180d MAE** | 31.4% | **20.0%** | -11.4% |
-| **Robusta 180d Bias** | -15.4% | **-6.4%** | +9.0% |
-| **Robusta 180d Hit-Rate** | 28.6% | **28.6%** | ~ |
+### Bekanntes Issue: Quantil-Coverage zu niedrig
+
+Das 90%-Konfidenzintervall deckt im Walk-Forward derzeit nur 21–35% der tatsächlichen Preise ab (Soll: ≈ 90%). Ursache: LightGBM-Quantile-Loss bei `alpha=0.05/0.95` produziert mit Default-Hyperparametern zu enge Quantile, und der Trainingsdatensatz ist mit ~2.5k Tagen klein. **Folgeschritt** (nicht in v6 enthalten): conformalisiertes Quantile-Stretching auf Basis der Walk-Forward-Residuen oder Hyperparameter-Tuning der α=0.05/0.95-Modelle separat. Bis dahin sind Low/High eher als "Bandbreite plausibler Ausreißer" zu lesen, nicht als kalibriertes Intervall.
 
 **Metriken erklärt:**
 - **MAE (Mean Absolute Error):** Durchschnittlicher Prognosefehler in %
