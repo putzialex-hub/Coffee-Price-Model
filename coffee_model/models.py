@@ -13,12 +13,16 @@ try:
 except ImportError:
     LIGHTGBM_AVAILABLE = False
 
-from .config import COMMODITIES, HORIZONS, MODEL_CONFIGS, QUANTILES
+from .config import COMMODITIES, HORIZONS, MODEL_CONFIGS, QUANTILES, TAIL_OVERRIDES
 from .features import create_xy_log_returns, fill_remaining_nan_with_zero
 
 
 def _build_estimator(commodity: str, alpha: float, engine: str):
     cfg = MODEL_CONFIGS[commodity][engine].copy()
+    # For non-median quantiles apply tail overrides (wider, smoother intervals).
+    # Alpha == 0.5 is always the median; everything else is a tail.
+    if alpha != 0.5 and commodity in TAIL_OVERRIDES and engine in TAIL_OVERRIDES[commodity]:
+        cfg.update(TAIL_OVERRIDES[commodity][engine])
     if engine == "sklearn":
         return GradientBoostingRegressor(loss="quantile", alpha=alpha, **cfg)
     if engine == "lightgbm":
