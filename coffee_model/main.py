@@ -14,8 +14,9 @@ from .features import add_features
 from .models import train_models, predict_prices
 from .validation import (
     bias_corrections, conformal_deltas, apply_conformal, summarise, walk_forward,
+    compare_baselines,
 )
-from .plotting import plot_backtest, plot_forecast
+from .plotting import plot_backtest, plot_forecast, plot_calibration
 from .shap_analysis import shap_for_forecast, plot_shap_drivers
 
 warnings.filterwarnings("ignore")
@@ -39,20 +40,22 @@ def _print_banner(engine: str) -> None:
 def _print_summary(summary: dict) -> None:
     if not summary:
         return
-    print("\n" + "=" * 70)
-    print("WALK-FORWARD VALIDATION ERGEBNISSE")
-    print("=" * 70)
+    print("\n" + "=" * 80)
+    print("WALK-FORWARD VALIDATION (2018–2025, monthly rolling)")
+    print("=" * 80)
     last_comm = None
     for (comm, h), m in summary.items():
         if comm != last_comm:
             print(f"\n{comm.upper()}:")
             last_comm = comm
+        wis_skill = m.get("wis_skill", float("nan"))
+        wis_str = f", WIS-Skill={wis_skill:+.1f}%" if not (isinstance(wis_skill, float) and np.isnan(wis_skill)) else ""
         print(
             f"   {h:3d}d: MAE={m['mae']:5.1f}%, Bias={m['bias']:+5.1f}%, "
             f"Hit-Rate(±15%)={m['hit_rate_15']:4.1f}%, "
             f"Dir-Acc={m.get('dir_accuracy', float('nan')):.0f}%, "
             f"Coverage(90%)={m['coverage_90']:4.1f}%, "
-            f"Pinball={m['pinball_base']:.4f} (n={m['n']})"
+            f"Pinball={m['pinball_base']:.4f}{wis_str} (n={m['n']})"
         )
 
 
@@ -84,10 +87,11 @@ def run(engine: str = DEFAULT_ENGINE,
     deltas = {}
 
     if not skip_backtest:
-        print("\n📊 Walk-Forward Validation (2022-2025)...")
+        print("\n📊 Walk-Forward Validation (2018–2025, monatlich)...")
         val_df = walk_forward(df, engine=engine)
         summary = summarise(val_df)
         _print_summary(summary)
+        compare_baselines(val_df)
         bias = bias_corrections(val_df)
         deltas = conformal_deltas(val_df)
         if deltas:
@@ -138,6 +142,11 @@ def run(engine: str = DEFAULT_ENGINE,
     bt = plot_backtest(val_df)
     if bt:
         print(f"✅ Backtest-Chart: {bt}")
+
+    if not val_df.empty:
+        cal = plot_calibration(val_df)
+        if cal:
+            print(f"✅ Kalibrierungs-Chart: {cal}")
 
     # SHAP driver decomposition for the 180d base-case model
     print("   Berechne SHAP-Treiber (180d)...")
