@@ -38,3 +38,20 @@ MODEL_CONFIGS = {
 # Default engine: "sklearn" (GradientBoostingRegressor) keeps v5 baseline,
 # "lightgbm" enables the new engine. Override with COFFEE_MODEL_ENGINE env var.
 DEFAULT_ENGINE = os.getenv("COFFEE_MODEL_ENGINE", "lightgbm")
+
+# Tail-quantile hyperparameter overrides (applied to q=0.05 and q=0.95 only).
+#
+# Defaults are empty — the base MODEL_CONFIGS are used unchanged.
+# Run  python -m coffee_model.main --tune  to search empirically optimal values
+# via TimeSeriesSplit grid search; results are cached in model_configs_tuned.json
+# and loaded automatically on subsequent runs.
+#
+# NOTE on raw coverage: LightGBM quantile models at extreme quantiles (0.05/0.95)
+# typically produce raw coverage of 20-50% for a 90% interval because the feature
+# set cannot explain all tail uncertainty. Conformal calibration (conformal_deltas +
+# apply_conformal) provides the finite-sample 90% coverage guarantee. The overrides
+# here let --tune improve the raw intervals, which reduces the conformal delta size.
+TAIL_OVERRIDES: dict[str, dict[str, dict]] = {
+    "arabica_price": {"lightgbm": {}, "sklearn": {}},
+    "robusta_price": {"lightgbm": {}, "sklearn": {}},
+}

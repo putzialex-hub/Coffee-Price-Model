@@ -18,6 +18,7 @@ from .validation import (
 )
 from .plotting import plot_backtest, plot_forecast, plot_calibration
 from .shap_analysis import shap_for_forecast, plot_shap_drivers
+from .tuning import load_tuned_overrides, tune_hyperparams
 
 warnings.filterwarnings("ignore")
 
@@ -71,7 +72,8 @@ def _apply_bias_correction(preds: dict, bias: dict[tuple[str, int], float]) -> d
 
 def run(engine: str = DEFAULT_ENGINE,
         skip_cot_update: bool = False,
-        skip_backtest: bool = False) -> None:
+        skip_backtest: bool = False,
+        tune: bool = False) -> None:
     _print_banner(engine)
 
     if not skip_cot_update:
@@ -80,6 +82,12 @@ def run(engine: str = DEFAULT_ENGINE,
     df_raw = load_data(DATA_DIR)
     df = add_features(df_raw)
     print(f"   ✅ Feature Engineering abgeschlossen ({len(df)} Zeilen)")
+
+    # Load or run quantile calibration tuning
+    if tune:
+        tune_hyperparams(df, engine=engine, force=True)
+    else:
+        load_tuned_overrides()  # no-op if cache is stale or absent
 
     val_df = pd.DataFrame()
     summary = {}
@@ -192,10 +200,14 @@ def main() -> None:
                         help="Skip the CFTC COT data refresh")
     parser.add_argument("--skip-backtest", action="store_true",
                         help="Skip the walk-forward backtest")
+    parser.add_argument("--tune", action="store_true",
+                        help="Run TimeSeriesSplit grid search for tail-quantile "
+                             "hyperparams (saves to model_configs_tuned.json, ~5 min)")
     args = parser.parse_args()
     run(engine=args.engine,
         skip_cot_update=args.skip_cot_update,
-        skip_backtest=args.skip_backtest)
+        skip_backtest=args.skip_backtest,
+        tune=args.tune)
 
 
 if __name__ == "__main__":
