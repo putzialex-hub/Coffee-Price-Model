@@ -1,12 +1,13 @@
-"""Forecast and backtest charts."""
+"""Forecast, backtest, and calibration charts."""
 from __future__ import annotations
 
 import os
 
 import matplotlib.pyplot as plt
+import numpy as np
 import pandas as pd
 
-from .config import COMMODITIES, HORIZONS, OUTPUT_DIR
+from .config import COMMODITIES, HORIZONS, OUTPUT_DIR, QUANTILES
 
 
 def _safe_drought_mg(df: pd.DataFrame) -> str:
@@ -115,7 +116,83 @@ def plot_backtest(val_df: pd.DataFrame, out_path: str = None) -> str | None:
         ax2.axhspan(-15, 15, alpha=0.1, color="green")
         ax2.set_ylim(-50, 50)
 
-    plt.suptitle("Walk-Forward Backtest Performance (2022-2025)", fontsize=14, fontweight="bold")
+    plt.suptitle("Walk-Forward Backtest Performance (2018–2025)", fontsize=14, fontweight="bold")
+    plt.tight_layout()
+    plt.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close()
+    return out_path
+
+
+def plot_calibration(
+    val_df: pd.DataFrame,
+    quantiles: list[float] = QUANTILES,
+    out_path: str | None = None,
+) -> str | None:
+    """Reliability diagram (calibration plot) for the quantile forecasts.
+
+    For each nominal quantile level q, we compute the empirical coverage:
+    the fraction of validation observations where actual ≤ predicted_q.
+    A perfectly calibrated model follows the diagonal y = x.
+
+    Separate sub-plots per commodity; one curve per horizon.
+    """
+    if val_df.empty:
+        return None
+    out_path = out_path or os.path.join(OUTPUT_DIR, "calibration_chart.png")
+
+    n_comm = len(COMMODITIES)
+    fig, axes = plt.subplots(1, n_comm, figsize=(7 * n_comm, 6))
+    if n_comm == 1:
+        axes = [axes]
+
+    nominal = sorted(quantiles)
+
+    for ax, comm in zip(axes, COMMODITIES):
+        comm_name = comm.replace("_price", "").capitalize()
+        colors = {"30": "#1f77b4", "90": "#ff7f0e", "180": "#2ca02c"}
+
+        for h in sorted(val_df["horizon"].unique()):
+            sub = val_df[(val_df["commodity"] == comm) & (val_df["horizon"] == h)].copy()
+            if sub.empty:
+                continue
+
+            empirical = []
+            for q in nominal:
+                if q == min(quantiles):
+                    pred_col = "predicted_low"
+                elif q == max(quantiles):
+                    pred_col = "predicted_high"
+                else:
+                    pred_col = "predicted"
+                emp_cov = (sub["actual"] <= sub[pred_col]).mean()
+                empirical.append(emp_cov)
+
+            color = colors.get(str(h), "gray")
+            ax.plot(nominal, empirical, "o-", color=color,
+                    label=f"{h}d (n={len(sub)})", linewidth=1.8, markersize=6)
+
+        # Perfect calibration diagonal
+        ax.plot([0, 1], [0, 1], "k--", linewidth=1, alpha=0.6, label="Perfect calibration")
+        ax.fill_between([0, 1], [0 - 0.10, 1 - 0.10], [0 + 0.10, 1 + 0.10],
+                        alpha=0.08, color="gray", label="±10% band")
+
+        ax.set_xlim(-0.05, 1.05)
+        ax.set_ylim(-0.05, 1.05)
+        ax.set_xlabel("Nominal quantile level", fontsize=10)
+        ax.set_ylabel("Empirical coverage (fraction of actuals ≤ predicted)", fontsize=10)
+        ax.set_title(f"{comm_name} — Quantile Calibration (Reliability Diagram)", fontsize=11)
+        ax.legend(fontsize=9)
+        ax.grid(alpha=0.3)
+
+        # Annotate quantile tick labels
+        ax.set_xticks(nominal)
+        ax.set_xticklabels([f"Q{int(q*100)}" for q in nominal])
+
+    plt.suptitle(
+        "Calibration Plot: Are predicted quantiles statistically honest?\n"
+        "(Points on diagonal = well-calibrated; above = over-confident; below = under-confident)",
+        fontsize=11, fontweight="bold",
+    )
     plt.tight_layout()
     plt.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close()
