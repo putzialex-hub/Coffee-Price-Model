@@ -5,3 +5,5 @@ lightgbm>=4.3,<5
 matplotlib>=3.8,<4
 requests>=2.31,<3
 scipy>=1.11,<2
+yfinance>=0.2,<2
+shap>=0.44,<1

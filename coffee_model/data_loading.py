@@ -11,6 +11,12 @@ import pandas as pd
 
 from .config import DATA_DIR, REPO_DIR
 
+try:
+    import yfinance as yf
+    YFINANCE_AVAILABLE = True
+except ImportError:
+    YFINANCE_AVAILABLE = False
+
 
 def should_update_cot(data_dir: str = DATA_DIR) -> bool:
     cot_file = os.path.join(data_dir, "cot_data.csv")
@@ -100,6 +106,46 @@ def _load_oni(data_dir: str) -> pd.DataFrame | None:
     return daily
 
 
+def _load_macro_yfinance(start: str = "2015-01-01") -> pd.DataFrame | None:
+    """Download USD/BRL and DXY (US Dollar Index) from Yahoo Finance.
+
+    USD/BRL is the most important macro driver for Arabica: when BRL weakens,
+    Brazilian farmers receive more reais per bag, increasing supply pressure and
+    pushing international prices down (and vice-versa). DXY captures broad
+    dollar strength that affects all USD-denominated commodities.
+
+    Returns a daily DataFrame with columns [date, USD_BRL, DXY], or None on failure.
+    """
+    if not YFINANCE_AVAILABLE:
+        return None
+    try:
+        import logging
+        logging.getLogger("yfinance").setLevel(logging.CRITICAL)
+        tickers = {"USDBRL=X": "USD_BRL", "DX-Y.NYB": "DXY"}
+        frames = []
+        for ticker, colname in tickers.items():
+            raw = yf.download(ticker, start=start, progress=False, auto_adjust=True)
+            if raw.empty:
+                continue
+            # yfinance returns MultiIndex columns when downloading single tickers
+            # in newer versions; handle both shapes.
+            if isinstance(raw.columns, pd.MultiIndex):
+                raw = raw.xs(ticker, axis=1, level=1) if ticker in raw.columns.get_level_values(1) else raw.droplevel(1, axis=1)
+            s = raw["Close"].rename(colname)
+            s.index = pd.to_datetime(s.index)
+            frames.append(s)
+        if not frames:
+            return None
+        macro = pd.concat(frames, axis=1).reset_index().rename(columns={"index": "date", "Date": "date", "Datetime": "date"})
+        macro["date"] = pd.to_datetime(macro["date"])
+        macro = macro.sort_values("date").reset_index(drop=True)
+        print("   ✅ Makro-Daten (USD/BRL, DXY) via yfinance geladen!")
+        return macro
+    except Exception as e:
+        print(f"   ⚠️ yfinance-Abruf fehlgeschlagen: {e}. Weiter ohne Makro-Daten.")
+        return None
+
+
 def load_data(data_dir: str = DATA_DIR) -> pd.DataFrame:
     arabica = pd.read_csv(os.path.join(data_dir, "arabica_clean.csv"))
     robusta = pd.read_csv(os.path.join(data_dir, "robusta_clean.csv"))
@@ -112,11 +158,16 @@ def load_data(data_dir: str = DATA_DIR) -> pd.DataFrame:
         on="date", how="outer",
     )
 
-    path_macro = os.path.join(data_dir, "coffee_data.csv")
-    if os.path.exists(path_macro):
-        macro = pd.read_csv(path_macro)
-        macro["date"] = pd.to_datetime(macro["Date"])
-        df = pd.merge(df, macro[["date", "USD_BRL", "DXY"]], on="date", how="left")
+    # Try yfinance first (always up-to-date), fall back to coffee_data.csv
+    macro = _load_macro_yfinance()
+    if macro is not None:
+        df = pd.merge(df, macro, on="date", how="left")
+    else:
+        path_macro = os.path.join(data_dir, "coffee_data.csv")
+        if os.path.exists(path_macro):
+            csv_macro = pd.read_csv(path_macro)
+            csv_macro["date"] = pd.to_datetime(csv_macro["Date"])
+            df = pd.merge(df, csv_macro[["date", "USD_BRL", "DXY"]], on="date", how="left")
 
     path_stocks_a = os.path.join(data_dir, "arabica_stocks.csv")
     if os.path.exists(path_stocks_a):
@@ -174,20 +225,23 @@ def load_data(data_dir: str = DATA_DIR) -> pd.DataFrame:
     df = df.sort_values("date").reset_index(drop=True)
 
     # Bounded forward-fill: prices 5d, weekly series 7d, weather 3d, monthly
-    # ONI 35d. NO backfill — never pull future values backwards.
+    # ONI 35d, macro (daily FX) 5d. NO backfill — never pull future values backwards.
     price_cols = ["arabica_price", "robusta_price"]
     cot_stock_cols = [c for c in df.columns if any(x in c for x in ["COT_", "stocks", "Stocks"])]
     weather_cols = [c for c in df.columns if any(x in c for x in ["rain_", "dry_streak", "temp_min"])]
     oni_cols = [c for c in df.columns if c.startswith("oni") or c in ("el_nino", "la_nina")]
+    macro_cols = [c for c in df.columns if c in ("USD_BRL", "DXY")]
     other_cols = [c for c in df.columns
                   if c != "date"
-                  and c not in price_cols + cot_stock_cols + weather_cols + oni_cols]
+                  and c not in price_cols + cot_stock_cols + weather_cols + oni_cols + macro_cols]
 
     df[price_cols] = df[price_cols].ffill(limit=5)
     df[cot_stock_cols] = df[cot_stock_cols].ffill(limit=7)
     df[weather_cols] = df[weather_cols].ffill(limit=3)
     if oni_cols:
         df[oni_cols] = df[oni_cols].ffill(limit=35)
+    if macro_cols:
+        df[macro_cols] = df[macro_cols].ffill(limit=5)
     df[other_cols] = df[other_cols].ffill(limit=7)
 
     df = df[df["date"] >= "2016-01-01"].reset_index(drop=True)
